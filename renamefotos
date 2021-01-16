@@ -1,0 +1,245 @@
+#!/bin/bash
+
+Version=1.01
+Myname="${0##*/}"
+
+:<<'DOC'
+= renamefotos - rename all image/movie files in current dir
+
+= Synopsis
+renamefotos [options]	
+
+== Options
+-h,--help	print this help and exit
+-H,--Help	print full documentation via less and exit
+-V,--version	print version and exit
+-f,--force	rename even if some files have no creation date
+-d,--dry	do a dry run, i.e. don´t actually rename files
+
+= Description
+renamefotos renames all |.jpg|, |.jpeg|, |.mov|, |.asf|, |.mts|, and |.avi|
+files in the current directory, using the creation date as reported by
+|exiftool|, using its |-createdate|, |-gpsdatetime|, and |-datetimeoriginal|
+options, in that order.
+No file is renamed if any of the files does not contain a date, as that
+would change file order. Upper case extensions are converted to lower case,
+jpeg is converted to jpg.
+
+The new name is will have the format |yyyymmdd-hhmmss|, with the extension of
+the original converted to lower case.  If renaming would generate an existing
+filename, an extra character |a-z| is added.
+
+= Author
+[Wybo Dekker](wybo@dekkerdocumenten.nl)
+
+= Copyright
+Released under the [GNU General Public License](www.gnu.org/copyleft/gpl.html)
+DOC
+
+REd='\e[38;5;9m' Mag='\e[38;5;5m' Nor='\e[0m'
+    die() { local i; for i; do echo -e "$Myname: $REd$i$Nor"; done 1>&2; exit 1; }
+   Warn() { local i; for i; do echo -e "$Myname: $Mag$i$Nor"; done 1>&2; }
+helpsrt() { sed -n '/^= Synopsis/,/^= /p' "$0"|sed '1d;$d'; exit; }
+helpall() { sed -n "/^:<<'DOC'$/,/^DOC/p" "$0"|sed '1d;$d'|
+            less -P"$Myname-${Version/./·} (press h for help, q to quit)";exit; }
+
+:<<'DOC' #---------------------------------------------------------------------
+= excheck
+synopsis:	 excheck executable1 [executable2...]
+description:	check if all needed execs are there and getopt is GNU
+DOC
+#-------------------------------------------------------------------------------
+excheck() {
+   local ok=true i
+   ((BASH_VERSINFO>=4)) || die "Need bash version >= 4"
+   for i; do 
+      command -v "$i" > /dev/null && continue
+      Warn "Missing executable: $i"
+      ok=false
+   done
+   $ok || die
+   getopt -T 
+   [[ $? -ne 4 ]] && die "Your getopt is not GNU"
+}
+
+:<<'DOC' #----------------------------------------------------------------------
+= handle_options
+synopsis:	 handle_options "$@"
+description:	handle the options.
+globals used:	 Myname Version
+DOC
+#-------------------------------------------------------------------------------
+handle_options() {
+   local options
+   options=$(getopt \
+      -n "$Myname" \
+      -o hHVIfd \
+      -l help,Help,version,force,dry -- "$@"
+   ) || exit 1
+   eval set -- "$options"
+   force=false dry=false
+   while [ $# -gt 0 ]; do
+      case $1 in
+      (-h|--help)    # print this help and exit
+		     helpsrt
+		     ;;
+      (-H|--Help)    # print full documentation via less and exit
+		     helpall
+		     ;;
+      (-V|--version) # print version and exit
+		     echo $Version
+		     exit
+		     ;;
+      (-f|--force)   # rename even if some files have no creation date
+		     force=true
+		     shift
+		     ;;
+      (-d|--dry)     # do a dry run, i.e. don´t actually rename files
+		     dry=true
+		     shift
+		     ;;
+      (-I)           instscript "$Myname" ||
+			die "the -I option is for developers only"
+		     exit
+		     ;;
+      (--)           shift
+		     break
+		     ;;
+      (*)            break
+		     ;;
+      esac
+   done
+}
+
+:<<'DOC' #----------------------------------------------------------------------
+= exists
+synopsis:	 handle_options "$@"
+description:	handle the options.
+globals used:	 Myname Version
+DOC
+#-------------------------------------------------------------------------------
+exists() {
+   local i
+   for i in "${!fromto[@]}"; do 
+      [[ $1 == "${fromto["$i"]}" ]] && return
+   done
+   return 1
+}
+
+:<<'DOC' #----------------------------------------------------------------------
+= rename
+synopsis:	 rename arg1 arg2
+description:	renames |arg1| to |arg2|, unless the |--dry| option was used,
+		and then reports this operation
+globals used:	 Myname Version dry
+DOC
+#-------------------------------------------------------------------------------
+rename() {
+   if ! $dry; then
+      mv "$1" "$2"
+      chmod a-x "$2" # remove any executable bit
+   fi
+   printf '%20s => %s\n' "$1" "$2"
+}
+   
+:<<'DOC' #----------------------------------------------------------------------
+= renameall
+description:	loops through the associative array |fromto| and renames each
+		key to the corresponding value
+globals used:	 Myname Version fromto
+DOC
+#-------------------------------------------------------------------------------
+renameall() {
+   local i
+   for i in "${!fromto[@]}"; do
+      rename "$i" "${fromto["$i"]}"
+   done
+}
+
+:<<'DOC' #----------------------------------------------------------------------
+= finddate
+synopsis:	 finddate arg
+description:	|finddate| tries, with |exiftool|s |-creationdate| option,
+                to find the creation date of the file given in the
+                argument. If that is not found, it tries the |-gpsdatetime|
+                and |-datetimeoriginal| options. The date found is reported 
+		in the format |dddddddd-dddddd|. 
+		If no date is found, reports an empty line.
+globals used:	 Myname Version
+DOC
+#-------------------------------------------------------------------------------
+finddate() {
+   local i f
+   for i in createdate gpsdatetime datetimeoriginal; do
+      f=$(
+         exiftool -$i "$1" |
+         sed 's/.*: //;s/ /-/;s/://gi;s/\.9Z//;s/\..*//'
+      )
+      test -n "$f" && break
+   done
+   echo "$f"
+}
+
+excheck getopt exiftool
+handle_options "$@"
+
+declare -A extconv=([jpeg]=jpg)
+declare -A fromto
+missing=() # files that have no date
+extensions='JPG,jpg,JPEG,jpeg,MOV,mov,AVI,avi,MP4,mp4,ASF,asf,MTS,mts'
+
+# gather image/video file names in fromto:
+while IFS= read -r x; do
+  x=${x#./}
+  fromto["$x"]="$x"
+done < <(eval ls ./*.\{$extensions\} 2>/dev/null)
+
+(( ${#fromto[@]} == 0 )) && die "No image/video files here"
+
+for i in "${!fromto[@]}"; do
+   ext=${i##*.}
+   base=${i%.*}
+   # skip if already in correct format:
+   if [[ $base =~ [[:digit:]]{8}-[[:digit:]]{6}[[:lower:]]? ]]; then
+      unset fromto["$i"]
+      continue
+   fi
+   # produce lower case extensions:
+   extnew="${ext,,}"
+   # some extensions will be replaced with standard ones:
+   [[ -n ${extconv[$extnew]} ]] && extnew="${extconv[$extnew]}"
+   basenew=$(finddate "$i")
+   if [[ -z $basenew ]]; then
+      unset fromto["$i"]
+      missing+=("$i")
+      continue
+   fi
+   # ok, can be renamed, but if file name would be there, add a suffix:
+   f="$basenew.$extnew"
+   while exists "$f"; do
+      for s in {a..z}; do
+         f="$basenew$s.$extnew"
+         exists "$f" || break 2
+      done 
+      die "No files renamed" \
+          "quitting because too many files have the same date ($basenew)" 
+   done
+   fromto["$i"]="$f"
+done
+
+(( ${#fromto[@]} == 0 )) && 
+   die "All image/video files lack date information" \
+       "or have already been converted"
+
+m=${#missing[@]}
+if $force || (( m == 0 )); then
+   renameall
+else
+   mess="These $m files have"
+   (( m == 1 )) && mess="This file has"
+   Warn "$mess missing dates and can not be renamed:" \
+        "${missing[@]}"
+   read -rp "Do you still want to rename the other files (yN)? " yn
+   [[ $yn =~ [yY] ]] && renameall
+fi
+$dry && die "This was a dry run, nothing changed"
