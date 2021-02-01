@@ -4,7 +4,7 @@ Version=1.01
 Myname="${0##*/}"
 
 :<<'DOC'
-= renamefotos - rename all image/movie files in current dir
+= renamefotos - rename all image/movie files in current dir by date/time
 
 = Synopsis
 renamefotos [options]	
