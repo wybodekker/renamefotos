@@ -1,7 +1,7 @@
 # renamefotos
 |     key | description
 |     ---:|:---
-|  script | renamefotos - rename all image/movie files in current dir
+|  script | renamefotos - rename all image/movie files in current dir by date/time
 |    type | bash
 |  author | Wybo Dekker
 |   email | wybo@dekkerdocumenten.nl
