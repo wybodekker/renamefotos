@@ -159,10 +159,10 @@ renameall() {
 :<<'DOC' #----------------------------------------------------------------------
 = finddate
 synopsis:	 finddate arg
-description:	|finddate| tries, with |exiftool|s |-creationdate| option,
-                to find the creation date of the file given in the
-                argument. If that is not found, it tries the |-gpsdatetime|
-                and |-datetimeoriginal| options. The date found is reported 
+description:	finddate tries, with |exiftool|‘s |-creationdate| option,
+		to find the creation date of the file given in the
+		argument. If that is not found, it tries the |-gpsdatetime|
+		and |-datetimeoriginal| options. The date found is reported 
 		in the format |dddddddd-dddddd|. 
 		If no date is found, reports an empty line.
 globals used:	 Myname Version
