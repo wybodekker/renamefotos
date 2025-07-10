@@ -1,6 +1,6 @@
 #!/bin/bash
 
-Version=1.01
+Version=1.03
 Myname="${0##*/}"
 
 :<<'DOC'
@@ -17,20 +17,34 @@ renamefotos [options]
 -d,--dry	do a dry run, i.e. don´t actually rename files
 
 = Description
-renamefotos renames all |.jpg|, |.jpeg|, |.mov|, |.asf|, |.mts|, and |.avi|
-files in the current directory, using the creation date as reported by
-|exiftool|, using its |-createdate|, |-gpsdatetime|, and |-datetimeoriginal|
-options, in that order.
-No file is renamed if any of the files does not contain a date, as that
-would change file order. Upper case extensions are converted to lower case,
-jpeg is converted to jpg.
+renamefotos renames all files in the current directory with the following
+extensiions:
 
-The new name is will have the format |yyyymmdd-hhmmss|, with the extension of
-the original converted to lower case.  If renaming would generate an existing
-filename, an extra character |a-z| is added.
+      .asf  .jpeg .mov  .mts  .tif 
+      .avi  .jpg  .mp4  .png  .tiff
 
+and their uppercase versions.
+The extensions are converted to 3 lowercase characters (like JPEG → jpg,
+tiff → tif).
+The base names are converted to the format |yyyymmdd-hhmmss| as reported by
+|exiftool|, using its |-datetimeoriginal|, |-createdate|, or |-gpsdatetime|
+options, in that order. If renaming would generate an existing filename, an
+extra character |a-z| is added. Files which lack date/time information in
+their metadata will be renamed to 101.xxx, 102.xxx, ...
+Base names that are already in that format are skipped here, unless you use
+the |--all| option.
+When one or more files don’t contain date/time information in their
+metadata, you get a warning and you are asked to make a decision about what
+to do with them:
+
+1. go on
+2. go on but set basename of dateless files in metadata title
+3. skip dateless files
+4. do nothing
+
+ 
 = Author
-[Wybo Dekker](wybo@dekkerdocumenten.nl)
+[Wybo Dekker](wybodekker@me.com)
 
 = Copyright
 Released under the [GNU General Public License](www.gnu.org/copyleft/gpl.html)
@@ -47,17 +61,18 @@ helpall() { sed -n "/^:<<'DOC'$/,/^DOC/p" "$0"|sed '1d;$d'|
 = excheck
 synopsis:	 excheck executable1 [executable2...]
 description:	check if all needed execs are there and getopt is GNU
+globals used:	 BASH_VERSINFO
 DOC
 #-------------------------------------------------------------------------------
 excheck() {
-   local ok=true i
+   local ok=true i missing=()
    ((BASH_VERSINFO>=4)) || die "Need bash version >= 4"
    for i; do 
       command -v "$i" > /dev/null && continue
-      Warn "Missing executable: $i"
+      missing+=("$i")
       ok=false
    done
-   $ok || die
+   $ok || die "Missing executables: ${missing[*]}"
    getopt -T 
    [[ $? -ne 4 ]] && die "Your getopt is not GNU"
 }
@@ -73,11 +88,11 @@ handle_options() {
    local options
    options=$(getopt \
       -n "$Myname" \
-      -o hHVIfd \
-      -l help,Help,version,force,dry -- "$@"
+      -o hHVIfa \
+      -l help,Help,version,force,all -- "$@"
    ) || exit 1
    eval set -- "$options"
-   force=false dry=false
+   force=false
    while [ $# -gt 0 ]; do
       case $1 in
       (-h|--help)    # print this help and exit
@@ -90,12 +105,12 @@ handle_options() {
 		     echo $Version
 		     exit
 		     ;;
-      (-f|--force)   # rename even if some files have no creation date
-		     force=true
+      (-a|--all)     # rename even if already in date/time format
+		     all=true
 		     shift
 		     ;;
-      (-d|--dry)     # do a dry run, i.e. don´t actually rename files
-		     dry=true
+      (-f|--force)   # rename even if some files have no creation date
+		     force=true
 		     shift
 		     ;;
       (-I)           instscript "$Myname" ||
@@ -112,10 +127,25 @@ handle_options() {
 }
 
 :<<'DOC' #----------------------------------------------------------------------
+= finddate
+synopsis:	 finddate arg
+description:	finddate tries, with |exiftool|‘s |-date| options, to find the
+		creation date of the photo given in the argument.
+		The date found is reported in the format |dddddddd-dddddd|. 
+		If no date is found, reports an empty line.
+globals used:	 none
+DOC
+#-------------------------------------------------------------------------------
+finddate() {
+   exiftool -datetimeoriginal -createdate -gpsdatetime -s3 -d "%Y%m%d-%H%M%S" "$1" |
+   head -1
+}
+
+:<<'DOC' #----------------------------------------------------------------------
 = exists
-synopsis:	 handle_options "$@"
-description:	handle the options.
-globals used:	 Myname Version
+synopsis:	 exists targetname
+description:	test if targetname already exists as a value in |fromto| array
+globals used:	 fromto
 DOC
 #-------------------------------------------------------------------------------
 exists() {
@@ -127,119 +157,108 @@ exists() {
 }
 
 :<<'DOC' #----------------------------------------------------------------------
-= rename
-synopsis:	 rename arg1 arg2
-description:	renames |arg1| to |arg2|, unless the |--dry| option was used,
-		and then reports this operation
-globals used:	 Myname Version dry
-DOC
-#-------------------------------------------------------------------------------
-rename() {
-   if ! $dry; then
-      mv "$1" "$2"
-      chmod a-x "$2" # remove any executable bit
-   fi
-   printf '%20s => %s\n' "$1" "$2"
-}
-   
-:<<'DOC' #----------------------------------------------------------------------
-= renameall
-description:	loops through the associative array |fromto| and renames each
-		key to the corresponding value
-globals used:	 Myname Version fromto
-DOC
-#-------------------------------------------------------------------------------
-renameall() {
-   local i
-   for i in "${!fromto[@]}"; do
-      rename "$i" "${fromto["$i"]}"
-   done
-}
-
-:<<'DOC' #----------------------------------------------------------------------
-= finddate
-synopsis:	 finddate arg
-description:	finddate tries, with |exiftool|‘s |-creationdate| option,
-		to find the creation date of the file given in the
-		argument. If that is not found, it tries the |-gpsdatetime|
-		and |-datetimeoriginal| options. The date found is reported 
-		in the format |dddddddd-dddddd|. 
-		If no date is found, reports an empty line.
+= mkuniq
+synopsis:	 mkuniq from to-base  to-ext
+description:	set the value of fromto[$1] to $2.$3
 globals used:	 Myname Version
 DOC
 #-------------------------------------------------------------------------------
-finddate() {
-   local i f
-   for i in createdate gpsdatetime datetimeoriginal; do
-      f=$(
-         exiftool -$i "$1" |
-         sed 's/.*: //;s/ /-/;s/://gi;s/\.9Z//;s/\..*//'
-      )
-      test -n "$f" && break
+mkuniq() {
+   local j=0 to fr="$1" b="$2" e="$3" # from basename extension
+   local app=({a..z})	# add a, b, ...to dups
+   to="$random-$b.$e"
+   while exists "$to"; do
+      ((j>25)) && die "No files renamed" \
+          "quitting because too many files have the same date ($base)"
+      to="$random-$b${app[((j++))]}.$e"
    done
-   echo "$f"
+   fromto["$fr"]="$to"
+   [[ $to =~ [a-z]\. ]] && ((same++))
 }
 
-excheck getopt exiftool
+excheck getopt exiftool cols
 handle_options "$@"
 
-declare -A extconv=([jpeg]=jpg)
 declare -A fromto
-missing=() # files that have no date
-extensions='JPG,jpg,JPEG,jpeg,MOV,mov,AVI,avi,MP4,mp4,ASF,asf,MTS,mts'
-
-# gather image/video file names in fromto:
-while IFS= read -r x; do
-  x=${x#./}
-  fromto["$x"]="$x"
-done < <(eval ls ./*.\{$extensions\} 2>/dev/null)
+while IFS='' read -r i; do
+  i=${i#./}
+  fromto["$i"]=''
+done <<<"$(find ./ -maxdepth 1 -type f \( \
+    -iname \*.jpg -o \
+    -iname \*.jpeg -o \
+    -iname \*.mov -o \
+    -iname \*.avi -o \
+    -iname \*.mp4 -o \
+    -iname \*.asf -o \
+    -iname \*.mts -o \
+    -iname \*.tif -o \
+    -iname \*.tiff -o \
+    -iname \*.png \
+  \))"
 
 (( ${#fromto[@]} == 0 )) && die "No image/video files here"
 
+ok=0
+n=100		# date-less files renumbered 101, 102,,,
+missing=()	# files that have no date
+same=0		# no of files with repeating date/time
+random=$(openssl rand -hex 10)
+
+# loop through the files and:
+# if the base is already in date/time format, don't change it.
+# if not, if the date/time can be found replace the base with it.
+# if not, set target to 101, 102, 103,...
+# make the extension lower case
+# change .jpeg to .jpg and .tiff to .tif
 for i in "${!fromto[@]}"; do
-   ext=${i##*.}
+   ext="${i##*.}"
+   ext="${ext,,}"
+   [[ $ext == jpeg ]] && ext=jpg
+   [[ $ext == tiff ]] && ext=tif
    base=${i%.*}
-   # skip if already in correct format:
-   if [[ $base =~ [[:digit:]]{8}-[[:digit:]]{6}[[:lower:]]? ]]; then
-      unset fromto["$i"]
-      continue
+   # if the base name is already in date/time format, it may have been assigned 
+   # om the basis of other than exiftool information, so we do not change it. 
+   # Still, the extension is corrected to 3 lower case characters.
+   if [[ ! $all && $base =~ ^[[:digit:]]{8}-[[:digit:]]{6}[[:lower:]]?$ ]]; then
+      mkuniq "$i" "$base" "$ext"
+   else
+      base=$(finddate "$i")
+      if [[ -n $base ]]; then
+         mkuniq "$i" "$base" "$ext"
+      else
+         missing+=("$i")
+         ((n++))
+         fromto["$i"]="$random-$n.$ext"
+      fi
    fi
-   # produce lower case extensions:
-   extnew="${ext,,}"
-   # some extensions will be replaced with standard ones:
-   [[ -n ${extconv[$extnew]} ]] && extnew="${extconv[$extnew]}"
-   basenew=$(finddate "$i")
-   if [[ -z $basenew ]]; then
-      unset fromto["$i"]
-      missing+=("$i")
-      continue
-   fi
-   # ok, can be renamed, but if file name would be there, add a suffix:
-   f="$basenew.$extnew"
-   while exists "$f"; do
-      for s in {a..z}; do
-         f="$basenew$s.$extnew"
-         exists "$f" || break 2
-      done 
-      die "No files renamed" \
-          "quitting because too many files have the same date ($basenew)" 
-   done
-   fromto["$i"]="$f"
 done
 
-(( ${#fromto[@]} == 0 )) && 
-   die "All image/video files lack date information" \
-       "or have already been converted"
-
-m=${#missing[@]}
-if $force || (( m == 0 )); then
-   renameall
-else
-   mess="These $m files have"
-   (( m == 1 )) && mess="This file has"
-   Warn "$mess missing dates and can not be renamed:" \
-        "${missing[@]}"
-   read -rp "Do you still want to rename the other files (yN)? " yn
-   [[ $yn =~ [yY] ]] && renameall
+if ! $force && (( ${#missing[@]} > 0)); then
+   Warn "The following files have no date/time information in their metadata:\n"
+   printf '%s\n' "${missing[@]}" | sort | cols
+   echo
+   Warn "They will be renamed to 101.xxx, 102.xxx ... What do you want:" \
+        "(type 1-4 or q to quit)"
+   select i in	"go on" \
+		"go on but set basename of dateless files in metadata title" \
+		"skip dateless files" \
+		"do nothing"
+   do
+      [[ -n $i || $REPLY == q ]] && break
+   done
+   case $REPLY in
+   (1) ;;
+   (2) for i in "${missing[@]}"; do
+          exiftool -title="${i%.*}" -overwrite_original -q "$i"
+       done
+       ;;
+   (3) for i in "${missing[@]}"; do
+          unset fromto["$i"]
+       done
+       ;;
+   (4|q) die "Nothing done"
+       ;;
+   esac
 fi
-$dry && die "This was a dry run, nothing changed"
+for i in "${!fromto[@]}"; do mv "$i" "${fromto["$i"]}"; done
+for i in "$random-"*; do mv "$i" "${i#$random-}"; done
